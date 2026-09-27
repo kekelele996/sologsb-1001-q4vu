@@ -70,6 +70,12 @@ button, input, textarea { font: inherit; }
 .timeline-block.active { color: #fff; background: #234f9d; box-shadow: 0 0 0 2px #9db9ed; }
 .timeline-block.issue { outline: 2px solid #e86b64; }
 .timeline-block.locked { opacity: .62; }
+.timeline-block.overtime { border-left-color: #e23f3f; background: repeating-linear-gradient(-45deg, #ffe3df 0, #ffe3df 6px, #ffd0c9 6px, #ffd0c9 12px); }
+.timeline-block.overtime b { color: #8f211d; }
+.timeline-block.overtime.active { background: repeating-linear-gradient(-45deg, #c3372f 0, #c3372f 6px, #a82c25 6px, #a82c25 12px); box-shadow: 0 0 0 2px #f2a7a2; }
+.timeline-block.overtime.active b { color: #fff; }
+.timeline-overtime-icon { position: absolute; top: 2px; right: 3px; color: #e23f3f; font-size: 11px; }
+.timeline-block.overtime.active .timeline-overtime-icon { color: #ffd7d4; }
 .timeline-ruler { position: absolute; left: 0; right: 0; top: 67px; }
 .timeline-ruler span { position: absolute; color: #98a3b4; font-size: 9px; }
 .cue-toolbar { display: flex; align-items: center; justify-content: space-between; margin: 18px 2px 8px; }
@@ -81,6 +87,14 @@ button, input, textarea { font: inherit; }
 .cue-row.active { border-color: #5d87dc; box-shadow: 0 0 0 3px rgba(47,111,237,.1), 0 7px 22px rgba(40,55,84,.07); }
 .cue-row.issue { border-left: 3px solid #e25f59; }
 .cue-row.locked { background: #f8fafc; }
+.cue-row.overtime { border-color: #f0a09c; border-left: 4px solid #e23f3f; background: #fff7f5; }
+.cue-row.overtime.active { border-color: #e23f3f; box-shadow: 0 0 0 3px rgba(226,63,63,.14), 0 7px 22px rgba(40,55,84,.07); }
+.timing-chip { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 2px 7px; border-radius: 999px; color: #4f7a5e; background: #eef7f1; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.timing-chip .el-icon { font-size: 11px; }
+.timing-chip.over { color: #fff; background: #e23f3f; animation: overtime-pulse 1.8s ease-in-out infinite; }
+@keyframes overtime-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(226,63,63,.45); } 50% { box-shadow: 0 0 0 4px rgba(226,63,63,0); } }
+.heading-counts { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+.overtime-total { font-weight: 700; }
 .cue-number { padding-top: 5px; color: #9aa6b8; font-family: ui-monospace, monospace; font-size: 12px; text-align: center; }
 .cue-main { min-width: 0; }
 .cue-topline { display: flex; align-items: center; gap: 8px; min-height: 24px; color: #7b879a; }
@@ -101,8 +115,21 @@ button, input, textarea { font: inherit; }
 .inspector-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 5px 0 2px; }
 .inspector-actions .el-button { margin-left: 0; }
 .locked-note { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: 7px; color: #735c16; background: #fff7dd; font-size: 12px; }
+.locked-overtime-note { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; border-radius: 7px; color: #9d211c; background: #ffecea; border: 1px solid #f3b8b3; font-size: 11px; line-height: 1.5; }
+.locked-overtime-note .el-icon { flex: none; margin-top: 1px; }
 .check-card { margin-top: 10px; padding: 11px; border: 1px solid #e0e7f0; border-radius: 9px; background: #f8fafc; }
 .check-card h3 { margin: 0 0 7px; color: #34435b; font-size: 12px; }
+.speech-card { margin-top: 4px; padding: 10px 11px; border: 1px solid #d9e6dd; border-radius: 9px; background: #f4faf6; }
+.speech-card.over { border-color: #f0a09c; background: #fff3f1; }
+.speech-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.speech-title { display: inline-flex; align-items: center; gap: 5px; color: #358268; font-size: 11px; font-weight: 700; }
+.speech-card.over .speech-title { color: #d33a36; }
+.speech-chars { color: #8793a7; font-size: 10px; }
+.speech-meter { height: 6px; margin: 8px 0 6px; overflow: hidden; border-radius: 999px; background: #e3ece7; }
+.speech-fill { display: block; height: 100%; border-radius: 999px; background: #49a07a; transition: width .2s; }
+.speech-fill.over { background: #e23f3f; }
+.speech-line { margin: 0; color: #5c6b7d; font-size: 10px; }
+.speech-over { margin: 4px 0 0; color: #d33a36; font-size: 11px; font-weight: 700; }
 .check-card p { margin: 5px 0; font-size: 11px; line-height: 1.45; }
 .check-ok { color: #358268; }
 .check-warning { color: #ad6610; }

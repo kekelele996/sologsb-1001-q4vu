@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import type { Cue, EditorDocument, Locale, Snapshot } from '../types'
 import { loadDocument, saveDocument } from '../utils/db'
 import { makeId } from '../utils/id'
-import { parseScript, parseSrt, toSrt } from '../utils/subtitle'
+import { parseScript, parseSrt, toSrt, getCueTiming } from '../utils/subtitle'
 import { translate, type MessageKey } from '../i18n'
 
 const DOCUMENT_ID = 'subtitle-dubbing-document'
@@ -73,6 +73,12 @@ export const useEditorStore = defineStore('subtitle-editor', {
     },
     totalDuration(state): number {
       return Math.max(10, ...state.document.cues.map((cue) => cue.end)) * 1.04
+    },
+    overtimeCues(state): Cue[] {
+      return state.document.cues.filter((cue) => getCueTiming(cue).isOvertime)
+    },
+    lockedOvertimeCues(state): Cue[] {
+      return state.document.cues.filter((cue) => cue.locked && getCueTiming(cue).isOvertime)
     },
   },
   actions: {
@@ -307,7 +313,11 @@ export const useEditorStore = defineStore('subtitle-editor', {
       }, cues[0].id)
       return cues.length
     },
-    exportSrt() {
+    exportSrt(): { blocked: true; overtimeCues: Cue[]; lockedOvertimeCues: Cue[] } | { blocked: false } {
+      const overtime = this.document.cues.filter((cue) => getCueTiming(cue).isOvertime)
+      if (overtime.length) {
+        return { blocked: true, overtimeCues: overtime, lockedOvertimeCues: overtime.filter((cue) => cue.locked) }
+      }
       const blob = new Blob([toSrt(this.document.cues)], { type: 'text/plain;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -315,6 +325,7 @@ export const useEditorStore = defineStore('subtitle-editor', {
       anchor.download = `${this.document.title || 'subtitle'}.srt`
       anchor.click()
       URL.revokeObjectURL(url)
+      return { blocked: false }
     },
   },
 })

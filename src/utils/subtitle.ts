@@ -73,3 +73,27 @@ export const toSrt = (cues: Cue[]): string =>
     .sort((a, b) => a.start - b.start)
     .map((cue, index) => `${index + 1}\n${formatTime(cue.start)} --> ${formatTime(cue.end)}\n${cue.target || cue.source}`)
     .join('\n\n') + '\n'
+
+export const SPEECH_CHARS_PER_SECOND = 4
+
+export interface CueTiming {
+  spoken: number
+  speed: number
+  estimated: number
+  duration: number
+  overtime: number
+  isOvertime: boolean
+}
+
+export const countSpokenChars = (text: string): number => text.replace(/\s/g, '').length
+
+export const getCueTiming = (cue: Pick<Cue, 'target' | 'speed' | 'start' | 'end'>): CueTiming => {
+  const spoken = countSpokenChars(cue.target ?? '')
+  const speed = cue.speed > 0 ? cue.speed : 1
+  const estimated = spoken / (SPEECH_CHARS_PER_SECOND * speed)
+  const duration = Math.max(0, cue.end - cue.start)
+  const isOvertime = estimated > duration
+  return { spoken, speed, estimated, duration, overtime: isOvertime ? estimated - duration : 0, isOvertime }
+}
+
+export const formatSeconds = (seconds: number): string => `${(Math.round(seconds * 10) / 10).toFixed(1)}s`
