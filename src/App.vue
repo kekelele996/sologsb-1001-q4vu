@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Clock, Delete, DocumentCopy, Download, EditPen, Files, Lock, MagicStick, Monitor,
-  RefreshLeft, RefreshRight, Search, Unlock, UploadFilled,
+  RefreshLeft, RefreshRight, Search, Unlock, UploadFilled, WarningFilled,
 } from '@element-plus/icons-vue'
 import { useEditorStore } from './store/editor'
 import type { Cue, CueConflict } from './types'
 import { formatTime } from './utils/subtitle'
+import { formatSeconds, getCueTiming, type CueTiming } from './utils/timing'
 
 const store = useEditorStore()
-const { document: project, selectedCue, selectedCueId, visibleCues, saveState, conflict, online, timelineZoom, actorFilter } = storeToRefs(store)
+const { document: project, selectedCue, selectedCueId, visibleCues, saveState, conflict, online, timelineZoom, actorFilter, cueTimings, overrunCues } = storeToRefs(store)
 const fileInput = ref<HTMLInputElement>()
 const snapshotDialog = ref(false)
 const snapshotName = ref('')
@@ -24,7 +25,23 @@ const filteredCues = computed(() => {
 })
 const selectedWarnings = computed(() => selectedCue.value ? cueWarnings(selectedCue.value) : [])
 const selectedTermMismatches = computed(() => selectedCue.value ? termMismatches(selectedCue.value) : [])
+const selectedTiming = computed<CueTiming | undefined>(() => selectedCue.value ? cueTimings.value.get(selectedCue.value.id) : undefined)
 const totalCharacters = computed(() => project.value.cues.reduce((sum, cue) => sum + cue.source.length + cue.target.length, 0))
+const overrunIds = computed(() => new Set(overrunCues.value.map((cue) => cue.id)))
+const isOverrun = (cue: Cue) => overrunIds.value.has(cue.id)
+const timingOf = (cue: Cue) => cueTimings.value.get(cue.id) ?? getCueTiming(cue)
+/** 时间轴上超时溢出段占总时长的百分比与定位 */
+const overrunTail = (cue: Cue) => {
+  const timing = timingOf(cue)
+  if (!timing.isOverrun) return null
+  const estimatedEnd = cue.start + timing.estimated
+  // 预计读音已延伸到时间轴末端之外时不绘制溢出段
+  if (estimatedEnd > store.totalDuration) return null
+  return {
+    left: `${(cue.end / store.totalDuration) * 100}%`,
+    width: `${Math.max(0.4, (timing.over / store.totalDuration) * 100)}%`,
+  } as Record<string, string>
+}
 const saveLabel = computed(() => ({
   saved: store.t('saved'), dirty: store.t('dirty'), saving: store.t('saving'), conflict: store.t('conflict'),
 }[saveState.value]))
@@ -90,6 +107,38 @@ function createSnapshot() {
   snapshotDialog.value = false
   ElMessage.success(store.t('savedNow'))
 }
+function jumpToCue(id: string) {
+  // 超时检查覆盖全部台词，定位时需保证目标在当前筛选与搜索结果中可见
+  if (actorFilter.value !== 'all' && !visibleCues.value.some((cue) => cue.id === id)) {
+    actorFilter.value = 'all'
+  }
+  search.value = ''
+  store.selectCue(id)
+  void nextTick(() => document.querySelector('.cue-row.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
+async function handleExport() {
+  const result = store.exportSrt()
+  if (result.exported) {
+    ElMessage.success(store.t('exportDone'))
+    return
+  }
+  const firstOverrun = overrunCues.value[0]
+  const message = h('div', { class: 'export-block-message' }, [
+    h('p', store.t('exportBlockedBody', { count: result.overrunCount })),
+    result.lockedOverrunCount > 0 ? h('p', { class: 'export-block-locked' }, store.t('exportBlockedLocked', { count: result.lockedOverrunCount })) : null,
+  ])
+  try {
+    await ElMessageBox.confirm(message, store.t('exportBlockedTitle'), {
+      type: 'error',
+      confirmButtonText: store.t('jumpToFirst'),
+      cancelButtonText: store.t('stay'),
+      distinguishCancelAndClose: true,
+    })
+    if (firstOverrun) jumpToCue(firstOverrun.id)
+  } catch {
+    // 导演选择“稍后处理”，不做任何修改
+  }
+}
 function onKeydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) return
@@ -145,7 +194,9 @@ const handleOffline = () => setOnline(false)
         <span class="save-state" :class="saveState"><i />{{ saveLabel }}</span>
         <input ref="fileInput" class="file-input" type="file" accept=".srt,.txt,text/plain" @change="importFile" />
         <el-button :icon="UploadFilled" @click="fileInput?.click()">{{ store.t('import') }}</el-button>
-        <el-button :icon="Download" @click="store.exportSrt">{{ store.t('export') }}</el-button>
+        <el-badge :hidden="!overrunCues.length" :value="overrunCues.length" type="danger" class="export-badge">
+          <el-button :icon="Download" @click="handleExport">{{ store.t('export') }}</el-button>
+        </el-badge>
         <el-button type="primary" :icon="DocumentCopy" @click="snapshotDialog = true">{{ store.t('snapshot') }}</el-button>
       </div>
     </header>
@@ -196,6 +247,9 @@ const handleOffline = () => setOnline(false)
             <div class="project-meta">
               <span>{{ store.t('cueCount', { count: project.cues.length }) }}</span>
               <span>{{ store.t('characterCount', { count: totalCharacters }) }}</span>
+              <span v-if="overrunCues.length" class="meta-overrun">
+                <el-icon><WarningFilled /></el-icon>{{ store.t('overrunCues', { count: overrunCues.length }) }}
+              </span>
               <span>revision {{ project.revision }}</span>
             </div>
           </div>
@@ -215,17 +269,33 @@ const handleOffline = () => setOnline(false)
           <div class="timeline-scroll">
             <div class="timeline" :style="{ width: `${timelineZoom * 100}%` }">
               <button
-                v-for="cue in filteredCues" :key="cue.id" class="timeline-block" :class="{ active: cue.id === selectedCueId, issue: cue.status === 'issue', locked: cue.locked }"
+                v-for="cue in filteredCues" :key="cue.id" class="timeline-block" :class="{ active: cue.id === selectedCueId, issue: cue.status === 'issue', locked: cue.locked, overrun: isOverrun(cue) }"
                 :style="{ left: `${(cue.start / store.totalDuration) * 100}%`, width: `${Math.max(1.8, ((cue.end - cue.start) / store.totalDuration) * 100)}%`, borderColor: actorColor(cue.actorId) }"
-                :title="`${formatTime(cue.start)} · ${cue.source}`" @click="store.selectCue(cue.id)"
-              ><span>{{ actorName(cue.actorId).split('/')[0] }}</span><b>{{ cue.target || cue.source }}</b></button>
+                :title="`${formatTime(cue.start)} · ${cue.source}${isOverrun(cue) ? ` · ${store.t('timingOverTag', { over: formatSeconds(timingOf(cue).over) })}` : ''}`" @click="store.selectCue(cue.id)"
+              >
+                <el-icon v-if="isOverrun(cue)" class="timeline-overrun-icon"><WarningFilled /></el-icon>
+                <span>{{ actorName(cue.actorId).split('/')[0] }}</span><b>{{ cue.target || cue.source }}</b>
+              </button>
+              <template v-for="cue in filteredCues" :key="`${cue.id}-overrun`">
+                <span
+                  v-if="overrunTail(cue)" class="timeline-overrun-tail" :style="overrunTail(cue)!"
+                  :title="store.t('timingOverTag', { over: formatSeconds(timingOf(cue).over) })"
+                  @click="store.selectCue(cue.id)"
+                />
+              </template>
               <div class="timeline-ruler"><span v-for="tick in [0, 15, 30, 45, 60]" :key="tick" :style="{ left: `${(tick / store.totalDuration) * 100}%` }">{{ tick }}s</span></div>
             </div>
           </div>
         </div>
 
         <div class="cue-toolbar">
-          <div class="section-heading"><span>{{ store.t('cues') }}</span><el-tag size="small" type="info">{{ filteredCues.length }}</el-tag></div>
+          <div class="section-heading">
+            <span>{{ store.t('cues') }}</span>
+            <el-tag size="small" type="info">{{ filteredCues.length }}</el-tag>
+            <el-tag v-if="overrunCues.length" size="small" type="danger" effect="dark" class="overrun-tag" disable-transitions>
+              <el-icon><WarningFilled /></el-icon>{{ store.t('overrunCues', { count: overrunCues.length }) }}
+            </el-tag>
+          </div>
           <el-input v-model="search" :prefix-icon="Search" clearable placeholder="搜索原文或译文" class="cue-search" />
           <el-select v-model="actorFilter" class="actor-mobile-filter">
             <el-option :label="store.t('allActors')" value="all" />
@@ -235,7 +305,7 @@ const handleOffline = () => setOnline(false)
 
         <div class="cue-list">
           <article
-            v-for="(cue, index) in filteredCues" :key="cue.id" class="cue-row" :class="{ active: cue.id === selectedCueId, issue: cue.status === 'issue', locked: cue.locked }"
+            v-for="(cue, index) in filteredCues" :key="cue.id" class="cue-row" :class="{ active: cue.id === selectedCueId, issue: cue.status === 'issue', locked: cue.locked, overrun: isOverrun(cue) }"
             tabindex="0" @click="store.selectCue(cue.id)" @keydown.enter="store.selectCue(cue.id)"
           >
             <div class="cue-number">{{ String(index + 1).padStart(2, '0') }}</div>
@@ -246,6 +316,11 @@ const handleOffline = () => setOnline(false)
                 <el-tag size="small" :type="statusType(cue.status)">{{ statusLabel(cue.status) }}</el-tag>
                 <el-icon v-if="cue.locked"><Lock /></el-icon>
                 <span class="cue-warning-count" v-if="cueWarnings(cue).length">{{ cueWarnings(cue).length }} context</span>
+                <span class="cue-timing" :class="{ over: isOverrun(cue) }">
+                  <el-icon v-if="isOverrun(cue)"><WarningFilled /></el-icon>
+                  {{ store.t('timingChip', { estimated: formatSeconds(timingOf(cue).estimated), available: formatSeconds(timingOf(cue).available) }) }}
+                  <template v-if="isOverrun(cue)"> · {{ store.t('timingOverTag', { over: formatSeconds(timingOf(cue).over) }) }}</template>
+                </span>
               </div>
               <p class="source-text">{{ cue.source }}</p>
               <p class="target-text" :class="{ empty: !cue.target }">{{ cue.target || '尚未填写译文' }}</p>
@@ -293,6 +368,23 @@ const handleOffline = () => setOnline(false)
             <el-button :icon="selectedCue.locked ? Unlock : Lock" @click="store.toggleLock(selectedCue.id)">{{ selectedCue.locked ? store.t('unlock') : store.t('lock') }}</el-button>
             <el-button @click="store.moveCue(selectedCue.id, -1)">↑ {{ store.t('moveUp') }}</el-button>
             <el-button @click="store.moveCue(selectedCue.id, 1)">↓ {{ store.t('moveDown') }}</el-button>
+          </div>
+
+          <div v-if="selectedTiming" class="timing-card" :class="{ overrun: selectedTiming.isOverrun }">
+            <h3><el-icon><Clock /></el-icon>{{ store.t('timingEstimate') }}</h3>
+            <div class="timing-rows">
+              <div><span>{{ store.t('timingEstimatedRow') }}</span><b>{{ formatSeconds(selectedTiming.estimated) }}{{ store.t('timingUnitSeconds') }}</b></div>
+              <div><span>{{ store.t('timingAvailableRow') }}</span><b>{{ formatSeconds(selectedTiming.available) }}{{ store.t('timingUnitSeconds') }}</b></div>
+              <div v-if="selectedTiming.isOverrun" class="timing-over-row"><span>{{ store.t('timingOverflowRow') }}</span><b>{{ store.t('timingOverTag', { over: formatSeconds(selectedTiming.over) }) }}</b></div>
+            </div>
+            <p class="timing-meta">{{ store.t('timingChars', { chars: selectedTiming.chars, speed: selectedCue.speed }) }}</p>
+            <p v-if="selectedTiming.isOverrun && selectedCue.locked" class="timing-note locked">
+              <el-icon><Lock /></el-icon>{{ store.t('timingLockedOverHint') }}
+            </p>
+            <p v-else-if="selectedTiming.isOverrun" class="timing-note over">
+              <el-icon><WarningFilled /></el-icon>{{ store.t('timingOverHint') }}
+            </p>
+            <p v-else class="timing-ok">{{ store.t('timingFitHint') }}</p>
           </div>
 
           <div class="check-card">

@@ -59,3 +59,11 @@ export interface HistoryEntry {
   cues: Cue[]
   selectedCueId: string | null
 }
+
+export interface ExportResult {
+  exported: boolean
+  /** 预计读音超出当前时长的台词数（含锁定条目） */
+  overrunCount: number
+  /** 其中被锁定、需要导演解锁处理的条数 */
+  lockedOverrunCount: number
+}

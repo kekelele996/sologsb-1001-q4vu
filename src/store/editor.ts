@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
-import type { Cue, EditorDocument, Locale, Snapshot } from '../types'
+import type { Cue, EditorDocument, ExportResult, Locale, Snapshot } from '../types'
 import { loadDocument, saveDocument } from '../utils/db'
 import { makeId } from '../utils/id'
 import { parseScript, parseSrt, toSrt } from '../utils/subtitle'
+import { getCueTiming, type CueTiming } from '../utils/timing'
 import { translate, type MessageKey } from '../i18n'
 
 const DOCUMENT_ID = 'subtitle-dubbing-document'
@@ -73,6 +74,20 @@ export const useEditorStore = defineStore('subtitle-editor', {
     },
     totalDuration(state): number {
       return Math.max(10, ...state.document.cues.map((cue) => cue.end)) * 1.04
+    },
+    /** 按 cue.id 索引的读音估算，译文 / 语速 / 起止时间变化后自动重算 */
+    cueTimings(state): Map<string, CueTiming> {
+      return new Map(state.document.cues.map((cue) => [cue.id, getCueTiming(cue)]))
+    },
+    /** 全部预计读音超时的台词（含锁定条目），与当前筛选无关 */
+    overrunCues(state): Cue[] {
+      return state.document.cues.filter((cue) => getCueTiming(cue).isOverrun)
+    },
+    overrunCount(): number {
+      return this.overrunCues.length
+    },
+    lockedOverrunCount(): number {
+      return this.overrunCues.filter((cue) => cue.locked).length
     },
   },
   actions: {
@@ -307,7 +322,12 @@ export const useEditorStore = defineStore('subtitle-editor', {
       }, cues[0].id)
       return cues.length
     },
-    exportSrt() {
+    exportSrt(): ExportResult {
+      // 锁定的超时条目也计入检查；存在任何超时条目时不导出
+      const overrun = this.document.cues.filter((cue) => getCueTiming(cue).isOverrun)
+      if (overrun.length) {
+        return { exported: false, overrunCount: overrun.length, lockedOverrunCount: overrun.filter((cue) => cue.locked).length }
+      }
       const blob = new Blob([toSrt(this.document.cues)], { type: 'text/plain;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -315,6 +335,7 @@ export const useEditorStore = defineStore('subtitle-editor', {
       anchor.download = `${this.document.title || 'subtitle'}.srt`
       anchor.click()
       URL.revokeObjectURL(url)
+      return { exported: true, overrunCount: 0, lockedOverrunCount: 0 }
     },
   },
 })
